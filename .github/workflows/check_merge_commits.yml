@@ -1,0 +1,35 @@
+name: Check Merge Commits
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  check-merge-commits:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for merge commits
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Fetching commits for PR #${{ github.event.pull_request.number }}..."
+          
+
+          MERGE_COMMITS_COUNT=$(gh api \
+            --paginate \
+            /repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/commits \
+            --jq '[.[] | select(.parents | length > 1)] | length')
+          
+          if [ -z "$MERGE_COMMITS_COUNT" ]; then
+            echo "Error: Failed to fetch commits or parse GitHub API response."
+            exit 1
+          fi
+
+          if [ "$MERGE_COMMITS_COUNT" -gt 0 ]; then
+            echo "::error::Found $MERGE_COMMITS_COUNT merge commit(s) in this Pull Request."
+            echo "Merge commits are not allowed in this repository."
+            echo "Please rebase your branch on top of the base branch instead."
+            exit 1
+          else
+            echo "No merge commits found. Good to go!"
+          fi
