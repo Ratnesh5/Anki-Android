@@ -48,6 +48,7 @@ class MediaErrorHandler : MediaErrorListener {
 
     private var missingMediaCount = 0
     private var hasExecuted = false
+    private val reportedMissingMedia = mutableSetOf<String>()
 
     private var automaticTtsFailureCount = 0
 
@@ -104,8 +105,10 @@ class MediaErrorHandler : MediaErrorListener {
 
         try {
             val filename = URLUtil.guessFileName(url.toString(), null, null)
-            onFailure.invoke(filename)
-            missingMediaCount++
+            if (reportedMissingMedia.add(filename)) {
+                onFailure.invoke(filename)
+                missingMediaCount++
+            }
         } catch (e: Exception) {
             Timber.w(e, "Failed to notify UI of media failure")
         } finally {
@@ -124,9 +127,11 @@ class MediaErrorHandler : MediaErrorListener {
 
         try {
             val fileName = file.name
-            onFailure.invoke(fileName)
-            if (!hasExecuted) {
-                missingMediaCount++
+            if (reportedMissingMedia.add(fileName)) {
+                onFailure.invoke(fileName)
+                if (!hasExecuted) {
+                    missingMediaCount++
+                }
             }
         } catch (e: Exception) {
             Timber.w(e, "Failed to notify UI of media failure")

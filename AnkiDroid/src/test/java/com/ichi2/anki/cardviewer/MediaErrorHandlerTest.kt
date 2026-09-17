@@ -81,6 +81,15 @@ class MediaErrorHandlerTest {
     }
 
     @Test
+    fun callAfterFlipSameImageIsIgnored() {
+        processFailure(getValidRequest("example.jpg"))
+        sut.onCardSideChange()
+        processFailure(getValidRequest("example.jpg"))
+        assertThat(timesCalled, equalTo(1))
+        assertThat(fileNames, contains("example.jpg"))
+    }
+
+    @Test
     fun thirdCallIsIgnored() {
         processFailure(getValidRequest("example.jpg"))
         sut.onCardSideChange()
