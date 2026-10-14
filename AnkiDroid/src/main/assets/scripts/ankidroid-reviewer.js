@@ -95,22 +95,58 @@ globalThis.ankidroid.onTypeAnswerKeyDown = function (event) {
     const SCHEME = "gesture";
     const MULTI_TOUCH_TIMEOUT = 300;
     const GESTURE_TIMEOUT = 800;
+    const TOUCH_SLOP = 10;
 
-    let startX = 0,
-        startY = 0,
-        touchCount = 0,
-        touchStartTime = 0;
+    let maxTouchCount = 0,
+        touchStartTime = 0,
+        exceededSlop = false,
+        startTouches = new Map();
 
     document.addEventListener(
         "touchstart",
         event => {
-            touchCount = event.touches.length;
-            startX = event.touches[0].pageX;
-            startY = event.touches[0].pageY;
-            // start counting from the first finger touch
-            if (touchCount === 1) {
-                touchStartTime = Date.now();
+            if (event.touches.length > maxTouchCount) {
+                maxTouchCount = event.touches.length;
             }
+            if (startTouches.size === 0) {
+                touchStartTime = Date.now();
+                exceededSlop = false;
+            }
+            for (let i = 0; i < event.changedTouches.length; i++) {
+                const touch = event.changedTouches[i];
+                startTouches.set(touch.identifier, {
+                    x: touch.pageX,
+                    y: touch.pageY,
+                });
+            }
+        },
+        { passive: true },
+    );
+
+    document.addEventListener(
+        "touchmove",
+        event => {
+            if (exceededSlop) return;
+            for (let i = 0; i < event.changedTouches.length; i++) {
+                const touch = event.changedTouches[i];
+                const start = startTouches.get(touch.identifier);
+                if (start) {
+                    const dx = Math.abs(touch.pageX - start.x);
+                    const dy = Math.abs(touch.pageY - start.y);
+                    if (dx > TOUCH_SLOP || dy > TOUCH_SLOP) {
+                        exceededSlop = true;
+                        break;
+                    }
+                }
+            }
+        },
+        { passive: true },
+    );
+
+    document.addEventListener(
+        "touchcancel",
+        () => {
+            resetTouches();
         },
         { passive: true },
     );
@@ -118,38 +154,58 @@ globalThis.ankidroid.onTypeAnswerKeyDown = function (event) {
     document.addEventListener(
         "touchend",
         event => {
+            if (exceededSlop) {
+                for (let i = 0; i < event.changedTouches.length; i++) {
+                    const touch = event.changedTouches[i];
+                    startTouches.delete(touch.identifier);
+                }
+            }
+
             // Only process after the final finger is lifted
-            if (
-                event.touches.length > 0 ||
-                touchCount > 4 ||
-                isTextSelected() ||
-                isInteractable(event)
-            )
-                return;
+            if (event.touches.length > 0) return;
+
+            const touchCount = maxTouchCount;
+            const elapsed = Date.now() - touchStartTime;
+            const hadMovedPastSlop = exceededSlop;
+
+            // Get primary touch start and end positions before resetting
+            const firstChangedTouch = event.changedTouches[0];
+            const primaryStart = startTouches.get(firstChangedTouch.identifier) || {
+                x: firstChangedTouch.pageX,
+                y: firstChangedTouch.pageY,
+            };
+            const endX = firstChangedTouch.pageX;
+            const endY = firstChangedTouch.pageY;
+
+            resetTouches();
+
+            if (touchCount > 4 || isTextSelected()) return;
 
             // Multi-finger detection
             if (touchCount > 1) {
-                if (Date.now() - touchStartTime > MULTI_TOUCH_TIMEOUT) {
+                if (elapsed > MULTI_TOUCH_TIMEOUT || hadMovedPastSlop) {
                     return;
                 }
                 window.location.href = `${SCHEME}://multiFingerTap/?touchCount=${touchCount}`;
                 return;
             }
 
+            if (isInteractable(event)) {
+                return;
+            }
+
             // Ignore gesture if it takes too long
-            if (Date.now() - touchStartTime > GESTURE_TIMEOUT) {
+            if (elapsed > GESTURE_TIMEOUT) {
                 return;
             }
 
             // Swipes and tap detection
-            const endX = event.changedTouches[0].pageX;
-            const endY = event.changedTouches[0].pageY;
             const scrollDirection = getScrollDirection(event.target);
             const params = new URLSearchParams({
                 x: Math.round(endX),
                 y: Math.round(endY),
-                deltaX: Math.round(endX - startX),
-                deltaY: Math.round(endY - startY),
+                deltaX: Math.round(endX - primaryStart.x),
+                deltaY: Math.round(endY - primaryStart.y),
                 time: Date.now(),
             });
             if (scrollDirection !== null) {
@@ -159,6 +215,13 @@ globalThis.ankidroid.onTypeAnswerKeyDown = function (event) {
         },
         { passive: true },
     );
+
+    function resetTouches() {
+        maxTouchCount = 0;
+        touchStartTime = 0;
+        exceededSlop = false;
+        startTouches.clear();
+    }
 
     /**
      * Checks if the target element or its parents are interactive.
